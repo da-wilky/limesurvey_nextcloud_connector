@@ -1,0 +1,6 @@
+.venv
+*.env
+*.log
+Dockerfile
+.dockerignore
+docker-compose.yml

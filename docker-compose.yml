@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  limesurvey_nextcloud_connector:
+    image: limesurvey_nextcloud_connector
+    container_name: limesurvey_nextcloud_connector
+    env_file:
+      - ./.docker.env
+    networks:
+      - rabbitmq
+
+networks:
+  rabbitmq:
+    external: true
