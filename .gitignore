@@ -3,3 +3,6 @@
 *.log
 *.bat
 test.py
+fonts
+*.pkl
+__pycache__

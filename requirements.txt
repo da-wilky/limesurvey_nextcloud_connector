@@ -2,3 +2,4 @@ pika
 pyncclient
 limesurveyrc2api
 python-dotenv
+fpdf2

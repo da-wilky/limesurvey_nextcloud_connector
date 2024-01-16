@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from limesurveyrc2api.limesurvey import LimeSurvey
 from pika.exchange_type import ExchangeType
 
+from pdf import create_pdf
+
 load_dotenv()
 
 LOG_FORMAT = (
@@ -417,11 +419,77 @@ class ExampleConsumer(object):
                     None,
                 ],
             )
-            pathlib.Path(str(surveyId)).mkdir(parents=True, exist_ok=True)
-            localfilename = f"{answers_json.get('filename', 'answers')}.{map_filetypes.get(filetype)}"
-            localfile = f"{str(surveyId)}/{localfilename}"
+            localfile = self._getFilepath(
+                surveyId,
+                f"{answers_json.get('filename', 'answers')}.{map_filetypes.get(filetype)}",
+            )
             with open(localfile, "wb") as f:
                 f.write(base64.b64decode(res_export))
+
+    def _getAnswersAsJSON(self, surveyId):
+        res_export = self._ls_api.query(
+            "export_responses",
+            [
+                # @param string $sSessionKey Auth credentials
+                self._ls_api.session_key,
+                # @param int $iSurveyID ID of the Survey
+                surveyId,
+                # @param string $sDocumentType any format available by plugins (for example : pdf, csv, xls, doc, json)
+                "json",
+                # @param string $sLanguageCode (optional) The language to be used
+                None,
+                # @param string $sCompletionStatus (optional) 'complete','incomplete' or 'all' - defaults to 'all'
+                "complete",
+                # @param string $sHeadingType (optional) 'code','full' or 'abbreviated' Optional defaults to 'code'
+                "code",
+                # @param string $sResponseType (optional)'short' or 'long' Optional defaults to 'short'
+                "long",
+                # @param integer $iFromResponseID (optional) Frpm response id
+                None,
+                # @param integer $iToResponseID (optional) To response id
+                None,
+                # @param array $aFields (optional) Name the fields to export
+                None,
+                # @param array $aAdditionalOptions (optional) Addition options for export, mainly 'convertY', 'convertN', 'nValue', 'yValue',
+                None,
+            ],
+        )
+        return json.loads(base64.b64decode(res_export))
+
+    def _createTextOverview(self, surveyId, surveyTitle, answers_json):
+        res_all_questions = self._ls_api.query(
+            "list_questions",
+            [
+                self._ls_api.session_key,
+                surveyId,
+            ],
+        )
+
+        questionArray = answers_json.get("questionArray", [])
+
+        copy_fields = ["title", "question", "help"]
+        res_map = {}
+        for question in res_all_questions:
+            if not question.get("title") in questionArray:
+                continue
+            res_map[question.get("title")] = {
+                "answers": [],
+            }
+            for field in copy_fields:
+                res_map[question.get("title")][field] = question.get(field)
+
+        res_answers = self._getAnswersAsJSON(surveyId)
+        for answer in res_answers.get("responses"):
+            for question in questionArray:
+                if answer.get(question) is None or answer.get(question) == "":
+                    continue
+                res_map[question]["answers"].append(answer.get(question))
+
+        localfile = self._getFilepath(
+            surveyId,
+            f"{answers_json.get('filename')}",
+        )
+        create_pdf(surveyId, surveyTitle, res_map, filename=localfile)
 
     def _requestStatisticFiles(self, surveyId, statistics_json):
         map_filetypes = {
@@ -447,9 +515,10 @@ class ExampleConsumer(object):
                     None,
                 ],
             )
-            pathlib.Path(str(surveyId)).mkdir(parents=True, exist_ok=True)
-            localfilename = f"{statistics_json.get('filename', 'answers')}.{map_filetypes.get(filetype)}"
-            localfile = f"{str(surveyId)}/{localfilename}"
+            localfile = self._getFilepath(
+                surveyId,
+                f"{statistics_json.get('filename', 'answers')}.{map_filetypes.get(filetype)}",
+            )
             with open(localfile, "wb") as f:
                 f.write(base64.b64decode(res_export))
 
@@ -472,6 +541,10 @@ class ExampleConsumer(object):
             os.rmdir(sSurveyId)
         except Exception as e:
             LOGGER.error("Could not remove local file", exc_info=True)
+
+    def _getFilepath(self, surveyId, filename):
+        pathlib.Path(str(surveyId)).mkdir(parents=True, exist_ok=True)
+        return f"{str(surveyId)}/{filename}"
 
     def on_message(self, _unused_channel, basic_deliver, properties, body):
         """Invoked by pika when a message is delivered from RabbitMQ. The
@@ -509,6 +582,8 @@ class ExampleConsumer(object):
         surveyId = received_json.get("id")
         sSurveyId = str(surveyId)
 
+        print(received_json)
+
         # Limesurvey requests
         try:
             self._ls_api.open(password=get_ls_password())
@@ -525,6 +600,11 @@ class ExampleConsumer(object):
             answers_json = received_json.get("answers", None)
             if answers_json is not None:
                 self._requestAnswerFiles(surveyId, answers_json)
+
+            # Create Text Files
+            text_json = received_json.get("textoverview", None)
+            if text_json is not None:
+                self._createTextOverview(surveyId, surveyName, text_json)
 
             # Request Statistic Files
             statistics_json = received_json.get("statistics", None)
