@@ -456,9 +456,9 @@ class ExampleConsumer(object):
     def _uploadFilesToNC(self, surveyId, ncDir):
         localfolder = str(surveyId)
         for file in os.listdir(localfolder):
-            filename, ext = os.path.splitext(file)
-            fileWithDate = f"{filename}_{time.strftime('%Y-%m-%d_%Hh%Mm')}{ext}"
-            self._nc_api.put_file(ncDir + "/" + fileWithDate, localfolder + "/" + file)
+            # filename, ext = os.path.splitext(file)
+            # fileWithDate = f"{filename}_{time.strftime('%Y-%m-%d_%Hh%Mm')}{ext}"
+            self._nc_api.put_file(ncDir + "/" + file, localfolder + "/" + file)
 
     def _removeLocalFiles(self, surveyId):
         sSurveyId = str(surveyId)
