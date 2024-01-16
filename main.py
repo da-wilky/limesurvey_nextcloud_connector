@@ -582,8 +582,6 @@ class ExampleConsumer(object):
         surveyId = received_json.get("id")
         sSurveyId = str(surveyId)
 
-        print(received_json)
-
         # Limesurvey requests
         try:
             self._ls_api.open(password=get_ls_password())
