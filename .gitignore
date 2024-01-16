@@ -2,3 +2,4 @@
 .venv
 *.log
 *.bat
+test.py

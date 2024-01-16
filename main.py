@@ -1,16 +1,16 @@
-import functools
-import logging
-import time
 import base64
+import functools
 import json
+import logging
 import os
 import pathlib
-from limesurveyrc2api.limesurvey import LimeSurvey
-import pika
-from pika.exchange_type import ExchangeType
-import nextcloud_client
+import time
 
+import nextcloud_client
+import pika
 from dotenv import load_dotenv
+from limesurveyrc2api.limesurvey import LimeSurvey
+from pika.exchange_type import ExchangeType
 
 load_dotenv()
 
@@ -381,6 +381,98 @@ class ExampleConsumer(object):
         if self._channel:
             self._channel.close()
 
+    def _requestAnswerFiles(self, surveyId, answers_json):
+        map_filetypes = {
+            "xls": "xlsx",
+            "pdf": "pdf",
+            "csv": "csv",
+            "doc": "doc",
+            "json": "json",
+        }
+        for filetype in answers_json.get("filetypeArray", []):
+            res_export = self._ls_api.query(
+                "export_responses",
+                [
+                    # @param string $sSessionKey Auth credentials
+                    self._ls_api.session_key,
+                    # @param int $iSurveyID ID of the Survey
+                    surveyId,
+                    # @param string $sDocumentType any format available by plugins (for example : pdf, csv, xls, doc, json)
+                    filetype,
+                    # @param string $sLanguageCode (optional) The language to be used
+                    None,
+                    # @param string $sCompletionStatus (optional) 'complete','incomplete' or 'all' - defaults to 'all'
+                    "complete",
+                    # @param string $sHeadingType (optional) 'code','full' or 'abbreviated' Optional defaults to 'code'
+                    "full",
+                    # @param string $sResponseType (optional)'short' or 'long' Optional defaults to 'short'
+                    "long",
+                    # @param integer $iFromResponseID (optional) Frpm response id
+                    None,
+                    # @param integer $iToResponseID (optional) To response id
+                    None,
+                    # @param array $aFields (optional) Name the fields to export
+                    answers_json.get("questionArray", None),
+                    # @param array $aAdditionalOptions (optional) Addition options for export, mainly 'convertY', 'convertN', 'nValue', 'yValue',
+                    None,
+                ],
+            )
+            pathlib.Path(str(surveyId)).mkdir(parents=True, exist_ok=True)
+            localfilename = f"{answers_json.get('filename', 'answers')}.{map_filetypes.get(filetype)}"
+            localfile = f"{str(surveyId)}/{localfilename}"
+            with open(localfile, "wb") as f:
+                f.write(base64.b64decode(res_export))
+
+    def _requestStatisticFiles(self, surveyId, statistics_json):
+        map_filetypes = {
+            "xls": "xls",
+            "pdf": "pdf",
+            "html": "html",
+        }
+        for filetype in statistics_json.get("filetypeArray", []):
+            res_export = self._ls_api.query(
+                "export_statistics",
+                [
+                    # @param string $sSessionKey Auth credentials
+                    self._ls_api.session_key,
+                    # @param int $iSurveyID ID of the Survey
+                    surveyId,
+                    # @param string $docType (optional) Type of documents the exported statistics should be (pdf|xls|html)
+                    filetype,
+                    # @param string $sLanguage (optional) language of the survey to use (default from Survey)
+                    None,
+                    # @param string $graph (optional) Create graph option (default : no)
+                    statistics_json.get("graph", None),
+                    # @param int|array $groupIDs (optional) array or integer containing the groups we choose to generate statistics from
+                    None,
+                ],
+            )
+            pathlib.Path(str(surveyId)).mkdir(parents=True, exist_ok=True)
+            localfilename = f"{statistics_json.get('filename', 'answers')}.{map_filetypes.get(filetype)}"
+            localfile = f"{str(surveyId)}/{localfilename}"
+            with open(localfile, "wb") as f:
+                f.write(base64.b64decode(res_export))
+
+    def _uploadFilesToNC(self, surveyId, ncDir):
+        localfolder = str(surveyId)
+        for file in os.listdir(localfolder):
+            filename, ext = os.path.splitext(file)
+            fileWithDate = f"{filename}_{time.strftime('%Y-%m-%d_%Hh%Mm')}{ext}"
+            self._nc_api.put_file(ncDir + "/" + fileWithDate, localfolder + "/" + file)
+
+    def _removeLocalFiles(self, surveyId):
+        sSurveyId = str(surveyId)
+        for file in os.listdir(sSurveyId):
+            localfile = f"{sSurveyId}/{file}"
+            try:
+                os.remove(localfile)
+            except Exception as e:
+                LOGGER.error("Could not remove local file", exc_info=True)
+        try:
+            os.rmdir(sSurveyId)
+        except Exception as e:
+            LOGGER.error("Could not remove local file", exc_info=True)
+
     def on_message(self, _unused_channel, basic_deliver, properties, body):
         """Invoked by pika when a message is delivered from RabbitMQ. The
         channel is passed for your convenience. The basic_deliver object that
@@ -416,23 +508,10 @@ class ExampleConsumer(object):
 
         surveyId = received_json.get("id")
         sSurveyId = str(surveyId)
-        localfile = sSurveyId + "/Anmeldungen.xlsx"
 
-        # Limesurvey request
+        # Limesurvey requests
         try:
             self._ls_api.open(password=get_ls_password())
-            res_export = self._ls_api.query(
-                "export_responses",
-                [
-                    self._ls_api.session_key,
-                    surveyId,
-                    "xls",
-                    None,
-                    "complete",
-                    "full",
-                    "long",
-                ],
-            )
             res_survey = self._ls_api.query(
                 "get_language_properties",
                 [
@@ -441,9 +520,17 @@ class ExampleConsumer(object):
                 ],
             )
             surveyName = res_survey.get("surveyls_title")
-            pathlib.Path(sSurveyId).mkdir(parents=True, exist_ok=True)
-            with open(localfile, "wb") as f:
-                f.write(base64.b64decode(res_export))
+
+            # Request Answer Files
+            answers_json = received_json.get("answers", None)
+            if answers_json is not None:
+                self._requestAnswerFiles(surveyId, answers_json)
+
+            # Request Statistic Files
+            statistics_json = received_json.get("statistics", None)
+            if statistics_json is not None:
+                self._requestStatisticFiles(surveyId, statistics_json)
+
             self._ls_api.close()
         except Exception as e:
             LOGGER.error("Limesurvey not reachable", exc_info=True)
@@ -462,23 +549,16 @@ class ExampleConsumer(object):
                     break
             if not folderExistsNC:
                 self._nc_api.mkdir(currentDir)
-            self._nc_api.put_file(
-                currentDir + "/Anmeldungen.xlsx", sSurveyId + "/Anmeldungen.xlsx"
-            )
+
+            self._uploadFilesToNC(surveyId, currentDir)
+
             self._nc_api.logout()
         except Exception as e:
             LOGGER.error("Nextcloud not reachable", exc_info=True)
             # No return so it tries to delete the local file
 
         # Remove local file
-        try:
-            os.remove(localfile)
-        except Exception as e:
-            LOGGER.error("Could not remove local file", exc_info=True)
-        try:
-            os.rmdir(sSurveyId)
-        except Exception as e:
-            LOGGER.error("Could not remove local file", exc_info=True)
+        self._removeLocalFiles(surveyId)
 
     def acknowledge_message(self, delivery_tag):
         """Acknowledge the message delivery from RabbitMQ by sending a
