@@ -456,6 +456,13 @@ class ExampleConsumer(object):
         )
         return json.loads(base64.b64decode(res_export))
 
+    def _buildBasicFieldName(self, question):
+        has_parent = question.get("parent_qid", 1) != 0
+        res = f"{question.get('sid')}X{question.get('gid')}X{question.get('parent_qid') if has_parent else question.get('qid')}"
+        if has_parent:
+            res += question.get("title")
+        return res
+
     def _createTextOverview(self, surveyId, surveyTitle, answers_json):
         res_all_questions = self._ls_api.query(
             "list_questions",
@@ -464,24 +471,67 @@ class ExampleConsumer(object):
                 surveyId,
             ],
         )
+        res_all_questions = sorted(
+            res_all_questions,
+            key=lambda k: (
+                int(k["sid"]),
+                int(k["gid"]),
+                int(k["parent_qid"]) if (int(k["parent_qid"]) != 0) else int(k["qid"]),
+                int(k["qid"]) if (int(k["parent_qid"]) != 0) else 0,
+            ),
+            reverse=False,
+        )
 
         questionArray = answers_json.get("questionArray", [])
 
-        copy_fields = ["title", "question", "help"]
+        questionid_map = {}
+        for question in res_all_questions:
+            questionid_map[question.get("qid")] = question
+
         res_map = {}
         for question in res_all_questions:
-            if not question.get("title") in questionArray:
+            # Get Basic Field Name
+            basicFieldName = self._buildBasicFieldName(question)
+            has_other = question.get("other") == "Y"
+            fail_normal = not basicFieldName in questionArray
+            fail_other = not has_other or not basicFieldName + "other" in questionArray
+            # If not Basic Field Name in send array from limesurvey -> go next
+            if fail_normal and fail_other:
                 continue
-            res_map[question.get("title")] = {
-                "answers": [],
-            }
-            for field in copy_fields:
-                res_map[question.get("title")][field] = question.get(field)
+            has_parent = question.get("parent_qid") != 0
+
+            if not fail_normal:
+                questionId = question.get("title")
+                questionText = question.get("question")
+                questionHelp = question.get("help")
+                if has_parent:
+                    parent = questionid_map.get(question.get("parent_qid"))
+                    questionId = f"{parent.get('title')}[{questionId}]"
+                    questionText = f"{parent.get('question')}[{questionText}]"
+                res_map[questionId] = {
+                    "title": questionId,
+                    "question": questionText,
+                    "help": questionHelp,
+                    "answers": [],
+                }
+
+            if not fail_other:
+                questionId = question.get("title") + "[other]"
+                questionText = question.get("question") + " (Andere)"
+                questionHelp = question.get("help")
+                res_map[questionId] = {
+                    "title": questionId,
+                    "question": questionText,
+                    "help": questionHelp,
+                    "answers": [],
+                }
 
         res_answers = self._getAnswersAsJSON(surveyId)
         for answer in res_answers.get("responses"):
-            for question in questionArray:
+            for question in res_map.keys():
                 if answer.get(question) is None or answer.get(question) == "":
+                    continue
+                if not question in res_map:
                     continue
                 res_map[question]["answers"].append(answer.get(question))
 
