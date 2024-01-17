@@ -507,7 +507,7 @@ class ExampleConsumer(object):
                 if has_parent:
                     parent = questionid_map.get(question.get("parent_qid"))
                     questionId = f"{parent.get('title')}[{questionId}]"
-                    questionText = f"{parent.get('question')}[{questionText}]"
+                    questionText = f"{parent.get('question')}\n{questionText}"
                 res_map[questionId] = {
                     "title": questionId,
                     "question": questionText,

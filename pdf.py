@@ -43,6 +43,7 @@ def create_pdf(surveyId, title, text_map, filename="pdf"):
         pdf.multi_cell(
             0,
             text=f"Frage: {question.get('question')} ({question.get('title')})",
+            align="L",
             new_x="LEFT",
             new_y="NEXT",
             padding=(0, 0, 5, 0),
@@ -52,6 +53,7 @@ def create_pdf(surveyId, title, text_map, filename="pdf"):
             pdf.multi_cell(
                 0,
                 text=f"Hilfetext: {question.get('help')}",
+                align="L",
                 new_x="LEFT",
                 new_y="NEXT",
                 padding=(0, 0, 10, 4),
@@ -62,6 +64,7 @@ def create_pdf(surveyId, title, text_map, filename="pdf"):
         pdf.multi_cell(
             0,
             text="Antworten:",
+            align="L",
             new_x="LEFT",
             new_y="NEXT",
             padding=(3, 0, 1, 5),
@@ -76,9 +79,10 @@ def create_pdf(surveyId, title, text_map, filename="pdf"):
             pdf.multi_cell(
                 0,
                 text=answer_text,
+                align="L",
                 new_x="LEFT",
                 new_y="NEXT",
-                padding=(1, 0, 2, 10),
+                padding=(1, 5, 2, 10),
                 fill=True,
             )
 
